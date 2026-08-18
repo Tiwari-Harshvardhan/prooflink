@@ -1,0 +1,97 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+  body {
+    background-color: #FAFBFF;
+  }
+  :focus-visible {
+    outline: 2px solid #3D5FF0;
+    outline-offset: 2px;
+  }
+}
+
+@layer components {
+  /* ---------- Layout primitives ---------- */
+  .card {
+    @apply bg-white border border-ink-100 rounded-xl2 shadow-card-float;
+  }
+  .doc-label {
+    @apply text-[11px] font-mono uppercase tracking-[0.14em] text-ink-400;
+  }
+
+  /* ---------- 3D "keycap" buttons ----------
+     Two-layer technique: a solid top face plus a flat-color drop
+     beneath it that reads as the button's edge. Pressing the button
+     moves the face down into its own shadow instead of just dimming. */
+  .btn-3d {
+    @apply relative inline-flex items-center justify-center gap-2 font-medium select-none;
+    border: none;
+    cursor: pointer;
+    transform: translateY(0);
+    transition: transform 0.1s ease, box-shadow 0.1s ease;
+  }
+  .btn-3d:active {
+    transform: translateY(3px);
+  }
+  .btn-3d:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+    transform: none !important;
+  }
+
+  .btn-3d-brand {
+    @apply btn-3d text-white rounded-xl px-5 py-3 text-sm;
+    background: #3D5FF0;
+    box-shadow: 0 4px 0 0 #1E37A8, 0 4px 0 0 #1E37A8, 0 14px 24px -10px rgba(61,95,240,0.55);
+  }
+  .btn-3d-brand:hover:not(:disabled) {
+    background: #3457E0;
+  }
+  .btn-3d-brand:active:not(:disabled) {
+    box-shadow: 0 0px 0 0 #1E37A8, 0 4px 10px -6px rgba(61,95,240,0.5);
+  }
+
+  .btn-3d-white {
+    @apply btn-3d text-ink-800 rounded-xl px-5 py-3 text-sm bg-white;
+    box-shadow: 0 4px 0 0 #DCE1EF, 0 10px 20px -12px rgba(15,23,41,0.25);
+    border: 1px solid #E7EBF4;
+  }
+  .btn-3d-white:hover:not(:disabled) {
+    background: #F7F9FF;
+  }
+  .btn-3d-white:active:not(:disabled) {
+    box-shadow: 0 0px 0 0 #DCE1EF, 0 4px 10px -8px rgba(15,23,41,0.2);
+  }
+
+  .btn-3d-sunset {
+    @apply btn-3d text-white rounded-xl px-5 py-3 text-sm;
+    background: #FF8A4C;
+    box-shadow: 0 4px 0 0 #C4581F, 0 14px 24px -10px rgba(255,138,76,0.5);
+  }
+  .btn-3d-sunset:active:not(:disabled) {
+    box-shadow: 0 0px 0 0 #C4581F, 0 4px 10px -6px rgba(255,138,76,0.4);
+  }
+
+  /* Small pressable icon-square, used for the social-style demo chips */
+  .chip-3d {
+    @apply btn-3d rounded-lg px-3.5 py-2 text-xs font-mono bg-white text-ink-700;
+    box-shadow: 0 3px 0 0 #E1E6F2;
+    border: 1px solid #E7EBF4;
+  }
+  .chip-3d:active:not(:disabled) {
+    box-shadow: 0 0px 0 0 #E1E6F2;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
