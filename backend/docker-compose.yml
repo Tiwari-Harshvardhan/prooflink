@@ -1,0 +1,47 @@
+version: '3.9'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: prooflink_postgres
+    environment:
+      POSTGRES_USER: prooflink_user
+      POSTGRES_PASSWORD: prooflink_secure_password
+      POSTGRES_DB: prooflink_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U prooflink_user -d prooflink_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - prooflink_network
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: prooflink_backend
+    environment:
+      DATABASE_URL: postgresql://prooflink_user:prooflink_secure_password@postgres:5432/prooflink_db
+      ENVIRONMENT: production
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - .:/app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    networks:
+      - prooflink_network
+
+volumes:
+  postgres_data:
+
+networks:
+  prooflink_network:
+    driver: bridge
