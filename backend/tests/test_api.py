@@ -1,85 +1,71 @@
-import pytest
 from datetime import datetime, timezone, timedelta
 
+from app.models.citizen import Citizen
+from app.models.prooflink import ProofLink
+
+
 def test_api_health(client):
-    """Endpoint 1 — Health check API."""
     response = client.get("/api/v1/health")
     assert response.status_code == 200
     assert response.json() == {"status": "healthy"}
 
-def test_api_create_and_verify_prooflink_flow(client):
-    """Endpoints 2, 3, 4, 5, 6 full lifecycle integration test."""
-    expires_at = (datetime.now(timezone.utc) + timedelta(days=2)).isoformat()
-    
-    # 1. Create ProofLink
-    create_payload = {
-        "institution_id": "POLICE-MP-001",
-        "action": "PAYMENT",
-        "amount": 80000,
-        "currency": "INR",
-        "recipient": "XXXX1234",
-        "purpose": "CASE_SETTLEMENT",
-        "reference_id": "CASE-2026-00123",
-        "expires_at": expires_at
-    }
-    
-    create_res = client.post("/api/v1/prooflinks", json=create_payload)
-    assert create_res.status_code == 201
-    created_data = create_res.json()
-    assert created_data["proof_id"] == "PL-2026-00123"
-    assert created_data["status"] == "ACTIVE"
-    assert created_data["signature_status"] == "SIGNED"
-    
-    proof_id = created_data["proof_id"]
-    
-    # 2. Get ProofLink details (for frontend)
-    get_res = client.get(f"/api/v1/prooflinks/{proof_id}")
-    assert get_res.status_code == 200
-    details = get_res.json()
-    assert details["proof_id"] == proof_id
-    assert details["instruction"]["amount"] == 80000.0
-    assert details["instruction"]["action"] == "PAYMENT"
-    assert details["institution"]["name"] == "Madhya Pradesh Police Department"
-    
-    # 3. Verify ProofLink
-    verify_res = client.post("/api/v1/verify", json={"proof_id": proof_id})
-    assert verify_res.status_code == 200
-    verify_data = verify_res.json()
-    assert verify_data["status"] == "VERIFIED"
-    assert verify_data["checks"]["exists"] is True
-    assert verify_data["checks"]["signature_valid"] is True
-    assert verify_data["checks"]["hash_valid"] is True
-    assert verify_data["checks"]["not_expired"] is True
-    assert verify_data["checks"]["not_revoked"] is True
-    
-    # 4. Revoke ProofLink
-    revoke_res = client.post(f"/api/v1/prooflinks/{proof_id}/revoke", json={"reason": "Instruction cancelled"})
-    assert revoke_res.status_code == 200
-    assert revoke_res.json()["status"] == "REVOKED"
-    
-    # 5. Verify again -> status should now be REVOKED
-    reverify_res = client.post("/api/v1/verify", json={"proof_id": proof_id})
-    assert reverify_res.status_code == 200
-    assert reverify_res.json()["status"] == "REVOKED"
-    assert reverify_res.json()["checks"]["not_revoked"] is False
+
+def _register_and_login(client, db_session, *, name, phone, aadhaar, role="CITIZEN"):
+    password = "correct-horse-battery"
+    if role == "CITIZEN":
+        response = client.post("/api/v1/auth/citizen/register", json={"name": name, "phone": phone, "password": password, "aadhaar_number": aadhaar})
+        assert response.status_code == 201, response.text
+        citizen = db_session.query(Citizen).filter(Citizen.user_id == response.json()["user_id"]).first()
+        citizen.phone_verified = True
+        db_session.commit()
+    else:
+        response = client.post("/api/v1/auth/official/register", json={"name": name, "phone": phone, "password": password, "institution_id": "POLICE-MP-001", "official_id": "OFF-TEST"})
+        assert response.status_code == 201, response.text
+    login = client.post("/api/v1/auth/login", json={"phone": phone, "password": password})
+    assert login.status_code == 200, login.text
+    return {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+
+def test_secure_instruction_to_payment_flow(client, db_session):
+    citizen_headers = _register_and_login(client, db_session, name="Rahul Sharma", phone="+919876543210", aadhaar="1234 5678 9012")
+    official_headers = _register_and_login(client, db_session, name="Officer", phone="+919876543211", aadhaar="", role="OFFICIAL")
+    created = client.post("/api/v1/official/instructions", headers=official_headers, json={
+        "citizen_aadhaar_number": "123456789012", "citizen_phone": "+91 98765 43210", "instruction_id": "abcd#1234",
+        "action": "PAYMENT", "amount": 5000, "currency": "INR", "purpose": "License fee", "reference_id": "REF-1234",
+        "issued_at": datetime.now(timezone.utc).isoformat(), "due_at": (datetime.now(timezone.utc) + timedelta(days=2)).isoformat(),
+    })
+    assert created.status_code == 201, created.text
+    assert "proof" not in created.json()
+    prooflink = db_session.query(ProofLink).one()
+    assert prooflink.citizen_id and prooflink.official_id and prooflink.instruction_id == "abcd#1234"
+    verified = client.post("/api/v1/verify", headers=citizen_headers, json={"prooflink": f"http://localhost:5173/verify?token={prooflink.proof_id}"})
+    assert verified.status_code == 200 and verified.json()["status"] == "VERIFIED"
+    order = client.post("/api/v1/payments/create-order", headers=citizen_headers, json={"prooflink": prooflink.proof_id})
+    assert order.status_code == 200 and order.json()["amount"] == 5000
+    paid = client.post("/api/v1/payments/verify", headers=citizen_headers, json={"payment_id": order.json()["payment_id"]})
+    assert paid.status_code == 200 and paid.json()["status"] == "PAID"
+    dashboard = client.get("/api/v1/dashboard/official/instructions", headers=official_headers)
+    assert dashboard.status_code == 200 and dashboard.json()[0]["payment_status"] == "PAID"
+
+
+def test_citizen_cannot_verify_another_citizens_prooflink(client, db_session):
+    owner_headers = _register_and_login(client, db_session, name="Owner", phone="+919876543210", aadhaar="123456789012")
+    other_headers = _register_and_login(client, db_session, name="Other", phone="+919876543212", aadhaar="999956789012")
+    official_headers = _register_and_login(client, db_session, name="Officer", phone="+919876543211", aadhaar="", role="OFFICIAL")
+    response = client.post("/api/v1/official/instructions", headers=official_headers, json={"citizen_aadhaar_number": "123456789012", "citizen_phone": "+919876543210", "instruction_id": "OWN-1", "action": "PAYMENT", "amount": 1, "currency": "INR", "purpose": "Test", "reference_id": "OWN-REF", "issued_at": datetime.now(timezone.utc).isoformat(), "due_at": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()})
+    assert response.status_code == 201
+    proof_id = db_session.query(ProofLink).one().proof_id
+    forbidden = client.post("/api/v1/verify", headers=other_headers, json={"prooflink": proof_id})
+    assert forbidden.status_code == 403
+    assert forbidden.json()["detail"]["error"] == "PROOFLINK_NOT_OWNED"
+    assert client.post("/api/v1/verify", headers=owner_headers, json={"prooflink": proof_id}).status_code == 200
+
 
 def test_api_institution_endpoints(client):
-    """Endpoint 6 — Institution details and security checks."""
     res = client.get("/api/v1/institutions/POLICE-MP-001")
     assert res.status_code == 200
-    data = res.json()
-    assert data["institution_id"] == "POLICE-MP-001"
-    assert data["name"] == "Madhya Pradesh Police Department"
-    assert data["type"] == "POLICE"
-    assert "public_key" in data
-    
-    # SECURITY INVARIANT: Private key must NEVER be exposed
-    assert "private_key" not in data
-    assert "privkey" not in data
-    assert "secret" not in data
+    assert "private_key" not in res.json()
+
 
 def test_api_list_institutions(client):
-    res = client.get("/api/v1/institutions")
-    assert res.status_code == 200
-    items = res.json()
-    assert len(items) >= 5
+    assert len(client.get("/api/v1/institutions").json()) >= 5

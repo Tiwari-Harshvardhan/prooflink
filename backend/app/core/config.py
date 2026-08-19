@@ -15,6 +15,15 @@ class Settings(BaseSettings):
     
     # Environment
     ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
+    FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://localhost:5173")
+
+    # Provider selection.  Mock providers are deliberately the default for
+    # the local demo; production credentials must be supplied through env vars.
+    SMS_PROVIDER: str = os.getenv("SMS_PROVIDER", "mock")
+    TWILIO_ACCOUNT_SID: str | None = os.getenv("TWILIO_ACCOUNT_SID")
+    TWILIO_AUTH_TOKEN: str | None = os.getenv("TWILIO_AUTH_TOKEN")
+    TWILIO_FROM_NUMBER: str | None = os.getenv("TWILIO_FROM_NUMBER")
+    KYC_PROVIDER: str = os.getenv("KYC_PROVIDER", "mock")
     
     class Config:
         case_sensitive = True

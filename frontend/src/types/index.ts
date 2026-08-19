@@ -52,6 +52,7 @@ export interface Revocation {
 }
 
 export interface CreateProofLinkRequest {
+  institution_id: string
   action: string
   amount: string
   currency: string
@@ -59,6 +60,35 @@ export interface CreateProofLinkRequest {
   purpose: string
   reference_id: string
   expires_at: string
+}
+
+export interface CreateInstructionRequest {
+  citizen_aadhaar_number: string
+  citizen_phone: string
+  instruction_id: string
+  action: string
+  amount: number
+  currency: string
+  purpose: string
+  reference_id: string
+  issued_at: string
+  due_at: string
+}
+
+export interface Instruction {
+  id: string
+  instruction_id: string
+  action: string
+  amount: number
+  currency: string
+  purpose: string
+  reference_id: string
+  issued_at: string
+  due_at: string
+  status: string
+  payment_status: string
+  payment_id?: string
+  paid_at?: string
 }
 
 export interface CreateProofLinkResponse {
@@ -117,6 +147,9 @@ export interface VerifyResponse {
     signature_status: 'VALID' | 'INVALID'
     instruction_status: ProofLinkStatus
     revocation_status: 'NOT_REVOKED' | 'REVOKED'
+    payment_status?: 'PENDING' | 'PAID'
+    payment_id?: string
+    paid_at?: string
   }
   message: string
 }

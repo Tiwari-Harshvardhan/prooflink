@@ -18,28 +18,27 @@ from app.services.prooflink_service import (
     revoke_prooflink,
 )
 from app.services.institution_service import get_institution
+from app.api.auth import get_current_user
+from app.services.auth_service import get_citizen_by_user_id, get_official_by_user_id
 
 router = APIRouter(prefix="/prooflinks", tags=["ProofLinks"])
 
 @router.post("", response_model=CreateProofLinkResponse, status_code=status.HTTP_201_CREATED, summary="Create ProofLink")
 def create_new_prooflink(
     payload: CreateProofLinkRequest,
+    current_user=Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
     Endpoint 2 — Create ProofLink
     Validates institution, signs canonical instruction with Ed25519, hashes with SHA-256, and stores in registry.
     """
-    prooflink = create_prooflink(db, payload)
-    return CreateProofLinkResponse(
-        proof_id=prooflink.proof_id,
-        status=prooflink.status,
-        signature_status="SIGNED"
-    )
+    raise HTTPException(status_code=status.HTTP_410_GONE, detail="Use POST /official/instructions. ProofLinks are generated only after verified citizen matching.")
 
 @router.get("/{proof_id}", response_model=ProofLinkDetailResponse, summary="Get ProofLink Details")
 def get_prooflink_details(
     proof_id: str,
+    current_user=Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
@@ -52,6 +51,10 @@ def get_prooflink_details(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"ProofLink '{proof_id}' not found."
         )
+    citizen = get_citizen_by_user_id(db, current_user.id)
+    official = get_official_by_user_id(db, current_user.id)
+    if (current_user.role == "CITIZEN" and (not citizen or prooflink.citizen_id != citizen.id)) or (current_user.role == "OFFICIAL" and (not official or prooflink.institution_id != official.institution_id)):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to view this ProofLink.")
 
     institution = get_institution(db, prooflink.institution_id)
     inst_detail = InstitutionDetail(
@@ -86,13 +89,20 @@ def get_prooflink_details(
 def revoke_existing_prooflink(
     proof_id: str,
     payload: RevokeRequest,
+    current_user=Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
     Endpoint 5 — Revoke
     Revokes the ProofLink and creates an immutable revocation audit record.
     """
-    revoked_item = revoke_prooflink(db, proof_id, reason=payload.reason)
+    if current_user.role != "OFFICIAL":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only officials can revoke ProofLinks.")
+    official = get_official_by_user_id(db, current_user.id)
+    existing = get_prooflink(db, proof_id)
+    if not existing or not official or existing.institution_id != official.institution_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="ProofLink not found.")
+    revoked_item = revoke_prooflink(db, proof_id, reason=payload.reason, revoked_by=official.id)
     return RevokeResponse(
         proof_id=revoked_item.proof_id,
         status=revoked_item.status

@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.models.prooflink import ProofLink
 from app.models.institution import Institution
 from app.models.revocation import Revocation
+from app.models.payment import Payment
 from app.schemas.verification import VerifyResponse, VerificationChecks
 from app.schemas.prooflink import InstructionDetail, InstitutionDetail
 from app.crypto.hashing import create_canonical_instruction, calculate_content_hash
@@ -48,10 +49,20 @@ def verify_prooflink(db: Session, proof_id: str) -> VerifyResponse:
     if not prooflink:
         return VerifyResponse(
             status="NOT_FOUND",
+            result="NOT_FOUND",
             proof_id=clean_proof_id,
             institution=None,
             instruction=None,
-            checks=VerificationChecks(**checks),
+            checks=VerificationChecks(
+                exists=False,
+                institution_recognized=False,
+                signature_valid=False,
+                hash_valid=False,
+                amount_match=False,
+                recipient_match=False,
+                not_expired=False,
+                not_revoked=False,
+            ),
             message="No ProofLink record found with the specified Proof ID."
         )
 
@@ -62,10 +73,20 @@ def verify_prooflink(db: Session, proof_id: str) -> VerifyResponse:
     if not institution or institution.status != "ACTIVE":
         return VerifyResponse(
             status="MISMATCH",
+            result="MISMATCH",
             proof_id=clean_proof_id,
             institution=None,
             instruction=None,
-            checks=VerificationChecks(**checks),
+            checks=VerificationChecks(
+                exists=True,
+                institution_recognized=False,
+                signature_valid=False,
+                hash_valid=False,
+                amount_match=False,
+                recipient_match=False,
+                not_expired=False,
+                not_revoked=True,
+            ),
             message=f"Issuing institution '{prooflink.institution_id}' is unknown, unrecognized, or inactive."
         )
 
@@ -108,10 +129,20 @@ def verify_prooflink(db: Session, proof_id: str) -> VerifyResponse:
         checks["hash_valid"] = False
         return VerifyResponse(
             status="HASH_MISMATCH",
+            result="HASH_MISMATCH",
             proof_id=clean_proof_id,
             institution=inst_detail,
             instruction=instr_detail,
-            checks=VerificationChecks(**checks),
+            checks=VerificationChecks(
+                exists=True,
+                institution_recognized=True,
+                signature_valid=False,
+                hash_valid=False,
+                amount_match=bool(prooflink.amount >= 0),
+                recipient_match=bool(prooflink.recipient and len(prooflink.recipient.strip()) > 0),
+                not_expired=(datetime.now(timezone.utc) <= (prooflink.expires_at if prooflink.expires_at.tzinfo else prooflink.expires_at.replace(tzinfo=timezone.utc))),
+                not_revoked=(db.query(Revocation).filter(Revocation.proof_id == prooflink.proof_id).first() is None),
+            ),
             message="Content fingerprint mismatch. The instruction data has been tampered with or corrupted."
         )
     checks["hash_valid"] = True
@@ -126,10 +157,20 @@ def verify_prooflink(db: Session, proof_id: str) -> VerifyResponse:
         checks["signature_valid"] = False
         return VerifyResponse(
             status="INVALID_SIGNATURE",
+            result="INVALID_SIGNATURE",
             proof_id=clean_proof_id,
             institution=inst_detail,
             instruction=instr_detail,
-            checks=VerificationChecks(**checks),
+            checks=VerificationChecks(
+                exists=True,
+                institution_recognized=True,
+                signature_valid=False,
+                hash_valid=True,
+                amount_match=bool(prooflink.amount >= 0),
+                recipient_match=bool(prooflink.recipient and len(prooflink.recipient.strip()) > 0),
+                not_expired=(datetime.now(timezone.utc) <= (prooflink.expires_at if prooflink.expires_at.tzinfo else prooflink.expires_at.replace(tzinfo=timezone.utc))),
+                not_revoked=(db.query(Revocation).filter(Revocation.proof_id == prooflink.proof_id).first() is None),
+            ),
             message="Cryptographic signature verification failed. This instruction was not authorized by the claimed institution."
         )
     checks["signature_valid"] = True
@@ -138,21 +179,43 @@ def verify_prooflink(db: Session, proof_id: str) -> VerifyResponse:
     revocation = db.query(Revocation).filter(Revocation.proof_id == prooflink.proof_id).first()
     if prooflink.status == "REVOKED" or revocation is not None:
         checks["not_revoked"] = False
-        # still check expiry and fields for complete check status
         now = datetime.now(timezone.utc)
         exp = prooflink.expires_at if prooflink.expires_at.tzinfo else prooflink.expires_at.replace(tzinfo=timezone.utc)
         checks["not_expired"] = (now <= exp)
         checks["amount_match"] = prooflink.amount >= 0
         checks["recipient_match"] = bool(prooflink.recipient)
-        
+
         reason = revocation.reason if revocation else "Instruction was revoked by the issuer."
         return VerifyResponse(
             status="REVOKED",
+            result="REVOKED",
             proof_id=clean_proof_id,
             institution=inst_detail,
             instruction=instr_detail,
-            checks=VerificationChecks(**checks),
-            message=f"Instruction was revoked. Reason: {reason}"
+            checks=VerificationChecks(
+                exists=True,
+                institution_recognized=True,
+                signature_valid=True,
+                hash_valid=True,
+                amount_match=checks["amount_match"],
+                recipient_match=checks["recipient_match"],
+                not_expired=checks["not_expired"],
+                not_revoked=False,
+            ),
+            message=f"Instruction was revoked. Reason: {reason}",
+            prooflink={
+                "action": prooflink.action,
+                "amount": str(prooflink.amount),
+                "currency": prooflink.currency,
+                "recipient": prooflink.recipient,
+                "purpose": prooflink.purpose,
+                "reference_id": prooflink.reference_id,
+                "issued_at": prooflink.created_at.isoformat(),
+                "expires_at": prooflink.expires_at.isoformat(),
+                "signature_status": "VALID",
+                "instruction_status": prooflink.status,
+                "revocation_status": "REVOKED",
+            }
         )
     checks["not_revoked"] = True
 
@@ -165,11 +228,34 @@ def verify_prooflink(db: Session, proof_id: str) -> VerifyResponse:
         checks["recipient_match"] = bool(prooflink.recipient)
         return VerifyResponse(
             status="EXPIRED",
+            result="EXPIRED",
             proof_id=clean_proof_id,
             institution=inst_detail,
             instruction=instr_detail,
-            checks=VerificationChecks(**checks),
-            message=f"Instruction expired on {prooflink.expires_at.isoformat()}."
+            checks=VerificationChecks(
+                exists=True,
+                institution_recognized=True,
+                signature_valid=True,
+                hash_valid=True,
+                amount_match=checks["amount_match"],
+                recipient_match=checks["recipient_match"],
+                not_expired=False,
+                not_revoked=True,
+            ),
+            message=f"Instruction expired on {prooflink.expires_at.isoformat()}.",
+            prooflink={
+                "action": prooflink.action,
+                "amount": str(prooflink.amount),
+                "currency": prooflink.currency,
+                "recipient": prooflink.recipient,
+                "purpose": prooflink.purpose,
+                "reference_id": prooflink.reference_id,
+                "issued_at": prooflink.created_at.isoformat(),
+                "expires_at": prooflink.expires_at.isoformat(),
+                "signature_status": "VALID",
+                "instruction_status": prooflink.status,
+                "revocation_status": "NOT_REVOKED",
+            }
         )
     checks["not_expired"] = True
 
@@ -180,19 +266,63 @@ def verify_prooflink(db: Session, proof_id: str) -> VerifyResponse:
     if not (checks["amount_match"] and checks["recipient_match"]):
         return VerifyResponse(
             status="MISMATCH",
+            result="MISMATCH",
             proof_id=clean_proof_id,
             institution=inst_detail,
             instruction=instr_detail,
-            checks=VerificationChecks(**checks),
+            checks=VerificationChecks(
+                exists=True,
+                institution_recognized=True,
+                signature_valid=True,
+                hash_valid=True,
+                amount_match=checks["amount_match"],
+                recipient_match=checks["recipient_match"],
+                not_expired=True,
+                not_revoked=True,
+            ),
             message="Instruction parameters failed integrity checks."
         )
 
     # Step 11: Complete Success -> VERIFIED
+    paid_payment = db.query(Payment).filter(
+        (Payment.prooflink_id == prooflink.proof_id) | (Payment.instruction_id == prooflink.instruction_id),
+        Payment.status == "PAID"
+    ).first()
+
+    is_paid = (paid_payment is not None) or (prooflink.status == "PAID")
+    payment_status = "PAID" if is_paid else "PENDING"
+
     return VerifyResponse(
         status="VERIFIED",
+        result="VERIFIED",
         proof_id=clean_proof_id,
         institution=inst_detail,
         instruction=instr_detail,
-        checks=VerificationChecks(**checks),
-        message="Instruction cryptographically verified and authorized."
+        checks=VerificationChecks(
+            exists=True,
+            institution_recognized=True,
+            signature_valid=True,
+            hash_valid=True,
+            amount_match=True,
+            recipient_match=True,
+            not_expired=True,
+            not_revoked=True,
+        ),
+        message="Instruction cryptographically verified and authorized.",
+        prooflink={
+            "action": prooflink.action,
+            "amount": str(prooflink.amount),
+            "currency": prooflink.currency,
+            "recipient": prooflink.recipient,
+            "purpose": prooflink.purpose,
+            "reference_id": prooflink.reference_id,
+            "issued_at": prooflink.created_at.isoformat(),
+            "expires_at": prooflink.expires_at.isoformat(),
+            "signature_status": "VALID",
+            "instruction_status": "PAID" if is_paid else prooflink.status,
+            "revocation_status": "NOT_REVOKED",
+            "payment_status": payment_status,
+            "payment_id": paid_payment.id if paid_payment else None,
+            "paid_at": paid_payment.paid_at.isoformat() if (paid_payment and paid_payment.paid_at) else None,
+        }
     )

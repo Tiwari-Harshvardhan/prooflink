@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { ArrowLeft, Loader2 } from 'lucide-react'
+import { ArrowLeft, Loader2, CheckCircle2 } from 'lucide-react'
 import { api } from '@/services/api'
 import type { VerifyResponse } from '@/types'
 import StatusSeal from '@/components/StatusSeal'
@@ -16,9 +16,13 @@ const MESSAGE_BY_RESULT: Record<string, string> = {
 }
 
 export default function VerifyResult() {
-  const { proofId } = useParams<{ proofId: string }>()
+  const rawProofId = useParams<{ proofId: string }>().proofId ?? ''
+  // proofId from the URL path may be URL-encoded (e.g. %23 for #). Decode it.
+  const proofId = decodeURIComponent(rawProofId)
   const [data, setData] = useState<VerifyResponse | null>(null)
   const [loading, setLoading] = useState(true)
+  const [paymentMessage, setPaymentMessage] = useState<string | null>(null)
+  const [paying, setPaying] = useState(false)
 
   useEffect(() => {
     if (!proofId) return
@@ -26,7 +30,7 @@ export default function VerifyResult() {
     api.verify(proofId).then((res) => {
       setData(res)
       setLoading(false)
-    })
+    }).catch(() => { setData(null); setLoading(false) })
   }, [proofId])
 
   if (loading) {
@@ -38,7 +42,7 @@ export default function VerifyResult() {
     )
   }
 
-  if (!data) return null
+  if (!data) return <div className="max-w-2xl mx-auto px-6 py-24 text-center text-coral">This ProofLink could not be verified for your account.</div>
 
   const link = data.prooflink
 
@@ -64,6 +68,7 @@ export default function VerifyResult() {
         <div className="card p-6 sm:p-8 mb-6">
           <p className="doc-label mb-5">Instruction details</p>
           <dl className="grid sm:grid-cols-2 gap-x-8 gap-y-4 text-sm">
+            <Field label="Instruction ID" value={link.reference_id} mono />
             <Field label="Institution" value={data.institution.name} />
             <Field label="Institution ID" value={data.institution.institution_id} mono />
             <Field label="Action" value={humanizeAction(link.action)} />
@@ -100,6 +105,56 @@ export default function VerifyResult() {
           <CheckItem label="Not revoked" passed={data.checks.not_revoked} />
         </ul>
       </div>
+      {data.result === 'VERIFIED' && link && (
+        <div className="card p-6 sm:p-8 mt-6">
+          <p className="doc-label mb-2">Authorized payment</p>
+          <p className="text-2xl font-display font-bold text-ink-900">{link.currency} {Number(link.amount).toLocaleString()}</p>
+
+          {link.payment_status === 'PAID' || link.instruction_status === 'PAID' ? (
+            <div className="mt-4 p-4 rounded-xl bg-mint/10 border border-mint/30 text-mint">
+              <div className="flex items-center gap-2 font-display font-semibold text-base">
+                <CheckCircle2 className="w-5 h-5" />
+                Payment Completed
+              </div>
+              <p className="text-xs text-ink-600 mt-1">
+                This transaction has been processed and verified on the registry.
+                {link.payment_id && <span className="block font-mono text-[11px] mt-1 text-ink-500">Transaction ID: {link.payment_id}</span>}
+              </p>
+            </div>
+          ) : (
+            <>
+              <p className="text-sm text-ink-500 mt-2">The amount is retrieved from the verified backend instruction and cannot be edited.</p>
+              {paymentMessage ? (
+                <div className="mt-4 p-4 rounded-xl bg-mint/10 border border-mint/30 text-mint font-medium text-sm">
+                  {paymentMessage}
+                </div>
+              ) : (
+                <button
+                  disabled={paying}
+                  onClick={async () => {
+                    setPaying(true)
+                    try {
+                      const order = await api.createPaymentOrder(data.proof_id)
+                      const result = await api.confirmPayment(order.payment_id)
+                      setPaymentMessage(`Mock payment successful — ${result.status}.`)
+                      // Refresh verification status so state updates immediately
+                      api.verify(proofId).then(setData)
+                    } catch (err: any) {
+                      const detail = err?.response?.data?.detail
+                      setPaymentMessage(typeof detail === 'string' ? detail : 'Payment failed')
+                    } finally {
+                      setPaying(false)
+                    }
+                  }}
+                  className="btn-3d-brand mt-5"
+                >
+                  {paying ? 'Processing…' : 'Proceed to secure test payment'}
+                </button>
+              )}
+            </>
+          )}
+        </div>
+      )}
     </div>
   )
 }

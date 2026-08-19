@@ -1,3 +1,4 @@
+import re
 import pytest
 from datetime import datetime, timezone, timedelta
 from fastapi import HTTPException
@@ -24,15 +25,39 @@ def test_create_and_get_prooflink(db_session):
     
     prooflink = create_prooflink(db_session, req)
     assert prooflink is not None
-    assert prooflink.proof_id == "PL-2026-00123"
+    assert prooflink.proof_id.startswith("PL-")
     assert prooflink.status == "ACTIVE"
     assert len(prooflink.content_hash) == 64
     assert len(prooflink.signature) > 0
     
     fetched = get_prooflink(db_session, prooflink.proof_id)
     assert fetched is not None
-    assert fetched.proof_id == "PL-2026-00123"
+    assert fetched.proof_id == prooflink.proof_id
     assert fetched.amount == 80000.0
+
+def test_create_prooflink_sanitizes_reference_id_and_stores_citizen_identity(db_session):
+    expires_at = datetime.now(timezone.utc) + timedelta(days=2)
+    req = CreateProofLinkRequest(
+        institution_id="POLICE-MP-001",
+        action="PAYMENT",
+        amount=150,
+        currency="INR",
+        recipient="Harshvardhan Tiwari",
+        purpose="Traffic challan",
+        reference_id="abcd#1234",
+        aadhaar_number="1234 5678 9012",
+        phone_number="+91-9876543210",
+        expires_at=expires_at
+    )
+
+    prooflink = create_prooflink(db_session, req)
+
+    assert prooflink is not None
+    assert re.fullmatch(r"PL-[A-Za-z0-9]+", prooflink.proof_id)
+    assert not "#" in prooflink.proof_id
+    assert prooflink.aadhaar_number is None
+    assert prooflink.phone_number == "+919876543210"
+
 
 def test_create_prooflink_unknown_institution_raises_404(db_session):
     expires_at = datetime.now(timezone.utc) + timedelta(days=2)

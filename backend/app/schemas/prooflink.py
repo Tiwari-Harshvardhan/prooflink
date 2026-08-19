@@ -10,12 +10,17 @@ class CreateProofLinkRequest(BaseModel):
     recipient: str = Field(..., example="XXXX1234")
     purpose: str = Field(..., example="CASE_SETTLEMENT")
     reference_id: str = Field(..., example="CASE-2026-00123")
+    instruction_id: Optional[str] = Field(default=None, example="abcd#1234")
+    aadhaar_number: Optional[str] = Field(default=None, example="1234 5678 9012")
+    phone_number: Optional[str] = Field(default=None, example="+91-9876543210")
     expires_at: datetime = Field(..., example="2026-08-20T18:00:00Z")
 
 class CreateProofLinkResponse(BaseModel):
     proof_id: str = Field(..., example="PL-2026-00123")
     status: str = Field(..., example="ACTIVE")
     signature_status: str = Field(..., example="SIGNED")
+    verification_url: str = Field(..., example="http://localhost:5173/verify/result/PL-2026-00123")
+    qr_placeholder: bool = Field(default=True, example=True)
 
 class RevokeRequest(BaseModel):
     reason: str = Field(..., example="Instruction cancelled")

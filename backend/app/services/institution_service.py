@@ -46,6 +46,14 @@ DEFAULT_INSTITUTIONS = [
     }
 ]
 
+import hashlib
+
+def get_institution_keypair(institution_id: str) -> tuple[ed25519.Ed25519PrivateKey, ed25519.Ed25519PublicKey]:
+    """Derive deterministic Ed25519 keypair for an institution (HSM/KMS adapter in production)."""
+    seed = hashlib.sha256(f"PROOFLINK_INSTITUTION_ED25519_KEY_{institution_id}".encode("utf-8")).digest()
+    priv_key = ed25519.Ed25519PrivateKey.from_private_bytes(seed)
+    return priv_key, priv_key.public_key()
+
 def register_institution_key(institution_id: str, private_key: ed25519.Ed25519PrivateKey) -> str:
     """Store private key in secure keystore and return its base64 public key."""
     _INSTITUTION_KEY_STORE[institution_id] = private_key
@@ -53,6 +61,9 @@ def register_institution_key(institution_id: str, private_key: ed25519.Ed25519Pr
 
 def get_institution_private_key(institution_id: str) -> Optional[ed25519.Ed25519PrivateKey]:
     """Retrieve an institution's private key for signing."""
+    if institution_id not in _INSTITUTION_KEY_STORE:
+        priv_key, _ = get_institution_keypair(institution_id)
+        _INSTITUTION_KEY_STORE[institution_id] = priv_key
     return _INSTITUTION_KEY_STORE.get(institution_id)
 
 def get_institution(db: Session, institution_id: str) -> Optional[Institution]:
@@ -67,14 +78,11 @@ def seed_default_institutions(db: Session) -> None:
     """Ensure default demo institutions and keys are seeded in DB and KeyStore."""
     for inst_data in DEFAULT_INSTITUTIONS:
         inst_id = inst_data["id"]
-        existing = db.query(Institution).filter(Institution.id == inst_id).first()
+        priv_key, pub_key = get_institution_keypair(inst_id)
+        pub_b64 = register_institution_key(inst_id, priv_key)
         
+        existing = db.query(Institution).filter(Institution.id == inst_id).first()
         if not existing:
-            # Generate new keypair
-            priv_key, pub_key = generate_keypair()
-            pub_b64 = export_public_key_b64(pub_key)
-            register_institution_key(inst_id, priv_key)
-
             institution = Institution(
                 id=inst_id,
                 name=inst_data["name"],
@@ -85,10 +93,6 @@ def seed_default_institutions(db: Session) -> None:
             db.add(institution)
             db.commit()
         else:
-            # If institution exists in DB but keystore doesn't have private key (e.g. reload),
-            # check if we can assign or keep a keypair in memory.
-            if inst_id not in _INSTITUTION_KEY_STORE:
-                priv_key, pub_key = generate_keypair()
-                register_institution_key(inst_id, priv_key)
-                existing.public_key = export_public_key_b64(pub_key)
+            if existing.public_key != pub_b64:
+                existing.public_key = pub_b64
                 db.commit()

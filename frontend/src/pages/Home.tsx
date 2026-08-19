@@ -1,8 +1,11 @@
 import { Link } from 'react-router-dom'
 import { ArrowRight, PhoneCall, FileSearch, ShieldCheck, Building2 } from 'lucide-react'
 import GradientMesh from '@/components/GradientMesh'
+import { useAuth } from '@/context/AuthContext'
 
 export default function Home() {
+  const { isAuthenticated, user } = useAuth()
+
   return (
     <div>
       {/* Hero */}
@@ -129,7 +132,10 @@ export default function Home() {
             Verify now <ArrowRight className="w-4 h-4" />
           </span>
         </Link>
-        <Link to="/institution" className="card p-7 hover:-translate-y-0.5 transition-transform group">
+        <Link
+          to={isAuthenticated && user?.role === 'OFFICIAL' ? '/institution' : '/login'}
+          className="card p-7 hover:-translate-y-0.5 transition-transform group"
+        >
           <span className="w-11 h-11 rounded-xl bg-brand-100 text-brand-600 flex items-center justify-center mb-4">
             <Building2 className="w-6 h-6" />
           </span>
@@ -140,7 +146,8 @@ export default function Home() {
             Issue and manage signed ProofLinks for outbound instructions.
           </p>
           <span className="text-sm font-medium text-brand-600 inline-flex items-center gap-1 group-hover:gap-2 transition-all">
-            Open dashboard <ArrowRight className="w-4 h-4" />
+            {isAuthenticated && user?.role === 'OFFICIAL' ? 'Open dashboard' : 'Sign in / Register'}{' '}
+            <ArrowRight className="w-4 h-4" />
           </span>
         </Link>
       </section>

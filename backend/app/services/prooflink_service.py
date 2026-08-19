@@ -3,7 +3,9 @@ ProofLink Service: Creation, retrieval, and revocation workflows.
 """
 from datetime import datetime, timezone
 from typing import Optional, List
+import hashlib
 import uuid
+import secrets
 import re
 from sqlalchemy.orm import Session
 from fastapi import HTTPException, status
@@ -15,18 +17,34 @@ from app.services.institution_service import get_institution, get_institution_pr
 from app.crypto.hashing import create_canonical_instruction, calculate_content_hash
 from app.crypto.signing import sign_canonical_instruction
 
-def generate_proof_id(reference_id: str) -> str:
-    """Generate deterministic or unique Proof ID (e.g., PL-2026-00123)."""
-    # If reference_id matches something like CASE-2026-00123, transform to PL-2026-00123
-    cleaned_ref = re.sub(r'^[A-Za-z]+[-_]', '', reference_id.strip())
-    if cleaned_ref:
-        return f"PL-{cleaned_ref}"
-    
-    current_year = datetime.now(timezone.utc).year
-    random_suffix = uuid.uuid4().hex[:6].upper()
-    return f"PL-{current_year}-{random_suffix}"
 
-def create_prooflink(db: Session, request: CreateProofLinkRequest) -> ProofLink:
+def normalize_phone_number(phone: str) -> str:
+    digits = re.sub(r"\D", "", phone or "")
+    return f"+{digits}" if digits and not digits.startswith("0") else digits
+
+
+def normalize_aadhaar_number(aadhaar: str) -> str:
+    digits = re.sub(r"\D", "", aadhaar or "")
+    return digits[-12:] if len(digits) >= 12 else digits
+
+
+def safe_instruction_id(reference_id: str) -> str:
+    cleaned = (reference_id or "").strip()
+    cleaned = cleaned.replace("#", "-")
+    cleaned = re.sub(r"[^A-Za-z0-9\-]", "-", cleaned)
+    cleaned = re.sub(r"-+", "-", cleaned).strip("-")
+    if not cleaned:
+        cleaned = f"INST-{uuid.uuid4().hex[:8].upper()}"
+    return cleaned
+
+
+def generate_proof_id(reference_id: str) -> str:
+    """Generate a safe ProofLink token while preserving valid reference formats like CASE-2026-00123."""
+    # ProofLink tokens are opaque, high-entropy references.  They never embed
+    # an instruction ID (which may contain URL-significant characters such as #).
+    return f"PL-{secrets.token_urlsafe(24).replace('_', '').replace('-', '')}"
+
+def create_prooflink(db: Session, request: CreateProofLinkRequest, *, citizen_id: str | None = None, official_id: str | None = None) -> ProofLink:
     """
     1. Validate institution
     2. Generate unique Proof ID
@@ -52,12 +70,18 @@ def create_prooflink(db: Session, request: CreateProofLinkRequest) -> ProofLink:
 
     # Step 2: Generate unique Proof ID
     proof_id = generate_proof_id(request.reference_id)
-    
+
     # Check if Proof ID already exists
     existing = db.query(ProofLink).filter(ProofLink.proof_id == proof_id).first()
     if existing:
-        # Append unique suffix if collision occurs
         proof_id = f"{proof_id}-{uuid.uuid4().hex[:4].upper()}"
+
+    # Instruction IDs are opaque data, not URL path components. Preserve values
+    # such as `abcd#1234` exactly; only the independently generated token is
+    # used in URLs.
+    cleaned_instruction_id = (getattr(request, "instruction_id", None) or request.reference_id).strip()
+    normalized_phone = normalize_phone_number(getattr(request, "phone_number", request.recipient))
+    normalized_aadhaar = normalize_aadhaar_number(getattr(request, "aadhaar_number", ""))
 
     # Standardize timestamps
     created_at = datetime.now(timezone.utc)
@@ -103,6 +127,16 @@ def create_prooflink(db: Session, request: CreateProofLinkRequest) -> ProofLink:
         recipient=request.recipient,
         purpose=request.purpose,
         reference_id=request.reference_id,
+        instruction_id=cleaned_instruction_id,
+        phone_number=normalized_phone,
+        # Never persist raw Aadhaar in a ProofLink.  The citizen registry owns
+        # the salted/hashed identity reference.
+        aadhaar_number=None,
+        citizen_phone=normalized_phone,
+        citizen_aadhaar_hash=hashlib.sha256(normalized_aadhaar.encode("utf-8")).hexdigest() if normalized_aadhaar else None,
+        citizen_aadhaar_masked=f"XXXX XXXX {normalized_aadhaar[-4:] if normalized_aadhaar else '0000'}" if normalized_aadhaar else None,
+        citizen_id=citizen_id,
+        official_id=official_id,
         content_hash=content_hash,
         signature=signature,
         status="ACTIVE",
