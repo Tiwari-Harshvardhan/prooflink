@@ -90,9 +90,9 @@ def test_verification_invalid_signature(db_session):
     
     prooflink = create_prooflink(db_session, req)
     
-    # Corrupt signature in database
+    # Corrupt signature in database (QDS path: must be invalid JSON or invalid QDS record)
     db_record = db_session.query(ProofLink).filter(ProofLink.proof_id == prooflink.proof_id).first()
-    db_record.signature = "ZmFrZXNpZ25hdHVyZXRvZmFpbHZlcmlmaWNhdGlvbg=="
+    db_record.signature = '{"bad": "not-a-qds-record", "protocol": "INVALID"}'
     db_session.commit()
     
     result = verify_prooflink(db_session, prooflink.proof_id)
@@ -141,3 +141,29 @@ def test_verification_revoked(db_session):
     assert result.status == "REVOKED"
     assert result.checks.not_revoked is False
     assert "superseded" in result.message
+
+
+def test_verification_idempotent_reverify(db_session):
+    """Test idempotent verification: viewing instruction multiple times and checking status post-payment."""
+    expires_at = datetime.now(timezone.utc) + timedelta(days=2)
+    req = CreateProofLinkRequest(
+        institution_id="POLICE-MP-001",
+        action="PAYMENT",
+        amount=5000,
+        currency="INR",
+        recipient="Ram Kumar",
+        purpose="TRAFFIC_FINE",
+        reference_id="CHALLAN-001",
+        expires_at=expires_at
+    )
+    prooflink = create_prooflink(db_session, req)
+
+    # Initial check (when citizen loads verification page)
+    r1 = verify_prooflink(db_session, prooflink.proof_id)
+    assert r1.status == "VERIFIED"
+    assert r1.checks.signature_valid is True
+
+    # Re-check (when citizen clicks payment and page refreshes)
+    r2 = verify_prooflink(db_session, prooflink.proof_id)
+    assert r2.status == "VERIFIED"
+    assert r2.checks.signature_valid is True

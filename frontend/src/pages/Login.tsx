@@ -48,7 +48,7 @@ export default function Login() {
           <p className="text-ink-500">Access your PROOFLINK account</p>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-4" autoComplete="off">
           <div>
             <label className="block text-sm font-medium text-ink-900 mb-1">
               Account Type
@@ -85,7 +85,10 @@ export default function Login() {
             </label>
             <input
               type="tel"
-              placeholder="+91-9876543210"
+              name="phone"
+              autoComplete="off"
+              data-lpignore="true"
+              placeholder="Enter phone number"
               value={phone}
               onChange={(e) => setPhone(e.target.value)}
               className="w-full px-4 py-2 rounded-lg border border-ink-200 focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none transition"
@@ -98,7 +101,10 @@ export default function Login() {
             </label>
             <input
               type="password"
-              placeholder="••••••••"
+              name="password"
+              autoComplete="new-password"
+              data-lpignore="true"
+              placeholder="Enter password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               className="w-full px-4 py-2 rounded-lg border border-ink-200 focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none transition"

@@ -13,3 +13,8 @@ passlib[bcrypt]>=1.7.4
 # passlib 1.7.x is incompatible with bcrypt 5.x's strict long-password probe.
 bcrypt>=4.0,<5.0
 PyJWT>=2.8.1
+# QDS prototype dependencies (Qiskit Aer local simulation — no quantum hardware required)
+# Versions tested: qiskit==2.5.2, qiskit-aer==0.17.2, numpy==2.3.3
+qiskit>=2.5.2
+qiskit-aer>=0.17.2
+numpy>=1.24.0

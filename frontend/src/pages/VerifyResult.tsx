@@ -110,7 +110,7 @@ export default function VerifyResult() {
           <p className="doc-label mb-2">Authorized payment</p>
           <p className="text-2xl font-display font-bold text-ink-900">{link.currency} {Number(link.amount).toLocaleString()}</p>
 
-          {link.payment_status === 'PAID' || link.instruction_status === 'PAID' ? (
+          {link.payment_status === 'PAID' || (link.instruction_status as string) === 'PAID' ? (
             <div className="mt-4 p-4 rounded-xl bg-mint/10 border border-mint/30 text-mint">
               <div className="flex items-center gap-2 font-display font-semibold text-base">
                 <CheckCircle2 className="w-5 h-5" />

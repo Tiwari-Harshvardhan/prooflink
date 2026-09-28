@@ -60,27 +60,18 @@ export default function CitizenVerifyOTP() {
           </p>
         </div>
 
-        {/* Demo Helper Banner */}
-        <div className="mb-6 p-3 rounded-xl bg-brand-50 border border-brand-200 text-xs text-brand-900 flex items-center justify-between">
-          <span>💡 <strong>Demo Mode</strong>: Test OTP is <code className="font-mono font-bold">123456</code></span>
-          <button
-            type="button"
-            onClick={() => setOtp('123456')}
-            className="px-2 py-1 bg-brand-500 text-white rounded font-medium hover:bg-brand-600 transition"
-          >
-            Auto-fill
-          </button>
-        </div>
-
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-4" autoComplete="off">
           <div>
             <label className="block text-sm font-medium text-ink-900 mb-1">
               OTP Code
             </label>
             <input
               type="text"
-              placeholder="123456"
+              name="otp_code"
+              placeholder="Enter 6-digit code"
               maxLength={6}
+              autoComplete="off"
+              data-lpignore="true"
               value={otp}
               onChange={(e) => setOtp(e.target.value.replace(/\D/g, ''))}
               className="w-full px-4 py-3 text-center text-2xl font-mono tracking-widest rounded-lg border border-ink-200 focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none transition"

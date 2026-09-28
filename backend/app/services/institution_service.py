@@ -76,8 +76,10 @@ def get_all_institutions(db: Session) -> List[Institution]:
 
 def seed_default_institutions(db: Session) -> None:
     """Ensure default demo institutions and keys are seeded in DB and KeyStore."""
+    from app.crypto.qds import register_signer
     for inst_data in DEFAULT_INSTITUTIONS:
         inst_id = inst_data["id"]
+        register_signer(inst_id)
         priv_key, pub_key = get_institution_keypair(inst_id)
         pub_b64 = register_institution_key(inst_id, priv_key)
         
